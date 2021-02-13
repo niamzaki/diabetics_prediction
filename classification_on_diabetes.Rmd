@@ -1,0 +1,280 @@
+---
+title: "Diabetics Prediction using Logistic Regression and K-Nearest Neighbors"
+author: "Niam Zaki Zamani"
+date: "January 20, 2021"
+output:
+  rmdformats::readthedown:
+    gallery: no
+    highlight: default
+    lightbox: yes
+    self_contained: yes
+    thumbnails: no
+    fig_align: center
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  word_document:
+    toc: yes
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+library(rmdformats)
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      warning = FALSE,
+                      message = FALSE)
+options(scipen = 99)
+```
+
+
+# Overview
+This time, we will try to predict whether the person is having diabetics or not based on several parameters. In this case, we will be focusing on a positive diabetes score and want our model to predict or capture as much data as possible that is likely to be diabetes positive. So that the matrix we are going to compare is the `Recall / Sensitivity` value in the `Logistic Regression` and `K-Nearest Neigbors` algorithms and which algorithm has the highest recall / sensitivity value. Recall / sensitivity itself is the percentage of the number of correct predictions on observations that are actually positive.
+
+The dataset we will use for making prediction is from kaggle that contains 9 attributes for 768 entries. If you interested, the dataset for this project can be accessed [here](https://www.kaggle.com/kandij/diabetes-dataset).
+
+# Library and Setup
+
+Load required packages.
+
+```{r}
+library(car)
+library(caret)
+library(class)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(performance)
+```
+
+
+# Logistic Regression
+## Data Preparation
+
+Load the dataset.
+
+```{r}
+diabetes <- read.csv("data_input/diabetes2.csv")
+```
+
+```{r,echo=FALSE}
+rmarkdown::paged_table(diabetes, options = list(rows.print = 10, cols.print=5))
+```
+
+Then we change the variable type according to what it should be.
+
+```{r}
+diabetes <- diabetes %>% 
+  mutate(Outcome = factor(Outcome, levels = c(0,1), labels = c("Not Diabetes", "Diabetes")))
+```
+
+```{r}
+glimpse(diabetes)
+```
+
+* `Pregnancies` -  Number of times pregnant.
+* `Glucose` - Plasma glucose concentration (glucose tolerance test).
+* `BloodPressure` - Diastolic blood pressure (mm Hg).
+* `SkinThickness` - Triceps skin fold thickness (mm).
+* `Insulin` - 2-Hour serum insulin (mu U/ml).
+* `BMI` - Body mass index (weight in kg/(height in m)^2).
+* `DiabetesPedigreeFunction` - Diabetes pedigree function.
+* `Age` - Age (years).
+* `Outcome` - Test for Diabetes
+
+
+## Exploratory Data Analysis
+
+Checking for missing values.
+
+```{r}
+colSums(is.na(diabetes))
+```
+
+
+We need to check the class proportion of the target variable.
+
+```{r}
+x <- prop.table(table(diabetes$Outcome))
+b <- barplot(x,col="lightBlue", main = "Target Class Proportion Diagram")
+text(x=b, y= x, labels=round(x,2), pos = 1)
+```
+The target variable class is still relatively balanced
+
+
+## Cross Validation
+
+Before we make the model, we need to split the data into train dataset and test dataset. We will 80% of the data as the training data and the rest of it as the testing data.
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(23)
+
+intrain <- sample(nrow(diabetes),nrow(diabetes)*.8)
+
+diabetes_train <- diabetes[intrain,]
+diabetes_test <- diabetes[-intrain,]
+```
+
+We need to check again the proportion of our train dataset, wheter it is still balanced or not.
+
+```{r}
+prop.table(table(diabetes_train$Outcome))
+```
+
+## Modelling
+
+We will try to create several models the Logistic Regression using Outcome as the target value. The models that we will create come from several ways, some from the my understanding or estimation and from stepwise selection.
+
+```{r}
+LR_diabetes_model_all <- glm(formula = Outcome ~ ., data = diabetes_train, family = "binomial")
+LR_diabetes_model_none <- glm(formula = Outcome~1,data = diabetes_train,family = "binomial")
+summary(LR_diabetes_model_all)
+```
+
+
+```{r}
+LR_diabetes_model_selected <- glm(formula = Outcome~Pregnancies+Glucose+BloodPressure+BMI+Insulin+DiabetesPedigreeFunction,data = diabetes_train,family = "binomial")
+
+LR_diabetes_model_backward <- step(object = LR_diabetes_model_all,direction = "backward",trace = F)
+```
+
+After making several models, now let’s compare each other.
+
+```{r}
+compare_performance(LR_diabetes_model_all,LR_diabetes_model_backward,LR_diabetes_model_selected)
+```
+
+In choosing which model is the best, the AIC value can be considered. AIC works to estimate the amount of "information loss" from one model to another. The smaller the AIC, the less information is lost, so the better the model is in predicting the data. And, from the result above, we will use `LR_diabetes_model_backward` as our Logistic Regression model. 
+
+```{r}
+summary(LR_diabetes_model_backward)
+```
+
+`LR_diabetes_model_backward`’s summary above contains lot of information. But, we need more focus on Pr(>|t|) and AIC. From Pr(>|t|) above, we can get information on which predictors have a significant influence on the target, if the value is below 0.05 (alpha), we asume that the variable has significant effect toward the model, and then the smaller the Pr(>|t|) value, the more significant the predictors have on the target, and to make it easier, there is a star symbol which indicates the more stars the more significant the predictor’s influence on the target.
+
+## Predicting
+
+After choosing the best model for our dataset, then we need to test our model performance using testing dataset that we have splitted above.
+
+```{r}
+diabetes_test_LR <- diabetes_test
+
+diabetes_test_LR$pred_model_backward <- predict(object = LR_diabetes_model_backward,newdata = diabetes_test_LR,type = "response")
+diabetes_test_LR$label_model_backward <- as.factor(ifelse(diabetes_test_LR$pred_model_backward > .5, "Diabetes", "Not Diabetes"))
+```
+
+```{r,echo=FALSE}
+rmarkdown::paged_table(diabetes_test_LR %>% select(c(Outcome,label_model_backward)), options = list(rows.print = 10, cols.print=5))
+```
+
+```{r}
+ggplot(diabetes_test_LR, aes(x=pred_model_backward)) +
+  geom_density(lwd=0.5) +
+  labs(title = "Distribution of Probability Prediction Data",x="Diabetes Probability",y="Density") +
+  theme_minimal()
+```
+From the probability prediction diagram above, it can be seen that the majority of the data are negative for diabetes.
+
+## Evaluation
+
+From testing performance using testing dataset above, we can evaluate our model using confusion matrix. Usually the mastrix used for model evaluation is accuracy, specificity, sensitivity, and precision. But in this case we focus on sensitivity, or the comparison between the number of positive observations that are predicted to be positive (True Positive) and the total number of observations that are actually positive (True Positive + False Negative).
+
+```{r}
+confusionMatrix_LR <- confusionMatrix(data = diabetes_test_LR$label_model_backward,reference = diabetes_test_LR$Outcome,positive = "Diabetes")
+confusionMatrix_LR
+```
+
+## Assumption test
+
+Assumptions are essentially conditions that should be met before we draw inferences regarding the model estimates. Logistics regression model needs multicolinearity test to prove that the resulting model is not misleading, or has biased estimators. Multicollinearity occurs when the independent variables are too highly correlated with each other.
+
+Multicollinearity will be tested with Variance Inflation Factor (VIF). Variance inflation factor of the linear regression is defined as VIF = 1/Tolerance (T). With VIF > 10 there is multicollinearity among the variables.
+
+```{r}
+vif(LR_diabetes_model_backward)
+```
+
+From result above, we can see that each variabel has no correlation because all of our predictors that used for making model have VIF < 10.
+
+# K-Nearest Neighbors
+
+The principle of K-Nearest Neighbor (KNN) is to find the closest distance between the data to be evaluated and the k closest neighbors in the training data. Where k is the number of closest neighbors.
+
+## Pre-Processing
+
+In determining the closest neighbors, it is necessary to ensure that the scale of each numerical predictor has the same or nearly the same scale. If the scale of each variable has a much different scale, it is necessary to equalize the scale of each variable so that the resulting results are balanced and unbiased.
+
+```{r}
+summary(diabetes)
+```
+
+From the information above, it turns out that the scale of each variable has high difference, so it is necessary to do scaling based on the average value and standard deviation of each variable from the train dataset.
+
+```{r}
+#Predictors
+diabetes_train_x <- diabetes_train %>% select(-Outcome)
+diabetes_test_x <- diabetes_test %>% select(-Outcome)
+
+#Target
+diabetes_train_y <- diabetes_train %>% select(Outcome)
+diabetes_test_y <- diabetes_test %>% select(Outcome)
+```
+
+So that the train and test dataset is the same even after scaling, the scaling process needs to be done using the same parameters. This means scaling the train dataset and test to use the average parameter and standard deviation of the train dataset for each predictor.
+
+```{r}
+diabetes_train_x_scaled <- scale(x = diabetes_train_x)
+diabetes_test_x_scaled <- scale(x = diabetes_test_x,
+                                center = attr(diabetes_train_x_scaled,"scaled:center"),
+                                scale = attr(diabetes_train_x_scaled,"scaled:scale"))
+```
+
+Then, to determine the number of k, generally it can be based on the root of the number of train datasets.
+
+```{r}
+k <- sqrt(nrow(diabetes_train))
+k~23
+```
+
+## Predicting
+
+Classification methods using k-NN do not build a model. More technically, it can say that no 'parameters' are learned about the data. Furthermore, after all the predictors are scaled, and the k value is obtained. Then predictions are made using using the parameters as below.
+
+```{r}
+diabetes_test_KNN <- diabetes_test
+diabetes_test_KNN$label_predicted_KNN <- knn(train = diabetes_train_x_scaled,test = diabetes_test_x_scaled,cl = diabetes_train$Outcome,k = 23)
+```
+
+```{r,echo=FALSE}
+rmarkdown::paged_table(diabetes_test_KNN %>% select(c(Outcome,label_predicted_KNN)), options = list(rows.print = 10, cols.print=5))
+```
+
+## Evaluation
+
+The prediction results above are then compared with the test dataset for evaluation of the results. And like the Logistic Regression above, the matrix to focus on is sensitivity.
+
+```{r}
+confusionMatrix_KNN <- confusionMatrix(data = diabetes_test_KNN$label_predicted_KNN,
+                reference = diabetes_test_KNN$Outcome,positive = "Diabetes")
+confusionMatrix_KNN
+```
+
+
+# Conclusion
+
+From the results of the evaluation of the two models above, it can be seen the sensitivity value for each method below.
+
+```{r}
+comparison_sensitivity <- data.frame("Sensitivity Logistic Regression"=data.frame(confusionMatrix_LR$byClass)[1,],
+           "Sensitivity K-Nearest Neighbors"=data.frame(confusionMatrix_KNN$byClass)[1,])
+```
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(comparison_sensitivity)
+```
+
+From the comparison results above, it appears that the results of the KNN have a better sensitivity value (0.4375) than the results of Logistic Regression (0.395). This means that KNN has a better performance in classification compared to Logistic Regression. However, KNN has a weakness because it is not possible to know which parameters/predictors have a strong influence in predicting targets. 
+
+Therefore, if we also pay attention to knowing the proportion of predictors' influence on the model, it is better to use Logistic Regression. But, if we focus more on the prediction results without paying attention to the proportion of predictors' influence on the model, then it is good to use KNN.
